@@ -1,0 +1,46 @@
+# Start the production image
+FROM node:14.19.1-alpine AS BUILD_IMAGE
+
+ARG NPM_TOKEN
+
+ENV APP_ROOT_DIRECTORY=/home/app
+
+# Making application directory and set as working directory
+WORKDIR /home/app
+
+# Copying npmrc package.json and lock file for docker layer caching
+COPY .npmrc package.json yarn.lock ./
+
+# Injecting NPM_TOKEN as a config to fetch private repositories
+RUN npm config set //npm.qa.procurenetworks.com/:_authToken $NPM_TOKEN
+
+# Installing packages including devDependencies
+RUN yarn --pure-lockfile
+
+# Copying code
+COPY . /home/app
+
+# Building service
+RUN yarn build
+
+# Prune the non-production packages
+RUN npm prune --production
+
+# Start the production image
+FROM node:14.19.1-alpine
+
+# Setting application directory as working directory
+WORKDIR /home/app
+
+# Copy package.json and other source code from repo
+COPY . .
+
+# Copy build and import artifacts from BUILD_IMAGE
+COPY --from=BUILD_IMAGE /home/app/node_modules ./node_modules
+COPY --from=BUILD_IMAGE /home/app/dist ./dist
+
+# Exposing Port
+EXPOSE 6000 8000
+
+# Starting service
+CMD [ "node", "--inspect=7000", "dist/index"]
